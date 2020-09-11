@@ -1,0 +1,347 @@
+              RJE80 - A 3780 Emulator for Hercules/370/390
+              ============================================
+
+
+             Preliminary Documentation for the Beta release
+
+
+
+
+What is RJE80?
+--------------
+
+It's a program that emulates an IBM 3780 RJE Terminal over a simulated
+bisync line connected to the Hercules/370/390 Emulator.  If that made
+perfect sense to you, skip on to the next section.  Otherwise, I'll explain
+it all now.
+
+RJE stands for Remote Job Entry, a protocol for transferring files to an
+IBM mainframe, and receiving files in return.  Normally, but not necessarily,
+these files take the form of 80 column "card decks" going to the mainframe,
+and "printed output" coming back to the terminal.  The original intent and 
+the most common use is to submit JCL to a mainframe operating system such 
+as MVS or DOS/VS, and to receive the results of the job.
+
+The IBM 3780 was the second in a line of RJE terminals IBM designed to implement
+"clients" for the system.  The 3780 is the most commonly emulated terminal
+in the commercial world, so I choose to emulate it.  The others, the 2780,
+2770, 3770, and 3741 are different in hardware but almost (not quite!) the 
+same in their capabilities and how they interact with the host system.
+
+The Hercules emulator is a software program that runs under Microsoft Windows
+and Linux on modern PC hardware, which emulates an IBM mainframe of the
+System/370 class.  One of the devices that Hercules emulates is a IBM 2703
+Bisync interface.
+
+RJE uses as its communciations medium an IBM protocol known as bisync,
+which stands for Binary Synchonous Communications.  Ordinarily, in the real
+world bisync uses special interfaces and modems to connection two machines.
+RJE80 does not use real bisync hardware like this, instead it pretends to
+be sending data over a bisync link but really it uses a TCP/IP socket 
+connection that is compatible with the Hercules implementation of the 
+2703.  What this all means is that a mainframe operating system running
+under Hercules that is configured to use a 2703 for RJE can talk to RJE80
+and it will think it's a 3780.
+
+The bottom line is, once you have your Hercules emulated System/370 configured,
+and your mainframe operating system sysgenned to talk to the 2703 lines, RJE80
+will submit jobs and receive printouts and punched card decks.
+
+
+
+Configuring Hercules
+--------------------
+
+Note:  To use RJE80 with Hercules, you need version 3.01 or above.  The
+2703 emulation is broken in earlier releases.
+
+Configuring Bisync lines is easy.  For each line you want to use, put a 
+line in your Hercules configuration file:
+
+0070 2703 dial=IN lhost=my.hostname.com lport=3780
+
+This line places a 2703 compatible bisync line at device 0070.  You need
+to supply the internet name or IP address in the lhost parameter, and
+the port that Hercules will use to listen for incoming "calls" from RJE80
+in the lport parameter.  If you are only going to use RJE80 to connect 
+to Hercules running on the same machine, use 127.0.0.1 as the lhost.
+The lport is your choice, but it should be above 1000 and each separate
+bisync line requires its own unique port.
+
+
+
+Configuring the Host Operating System
+-------------------------------------
+
+This is a broad topic, only part of which is understood by me at this
+point in time.  I have tested RJE80 with VM/370 and DOS/VS, so I will
+discuss those two.  More information will follow as I figure out how
+to configure RJE under OS/360, MVS, and OS/VS1.
+
+VM/370
+------
+
+VM/370 has a subsystem called RSCS which supports the 3780 RJE terminal.
+RSCS does not do RJE proper, in that it's not devoted to accepting jobs
+and processing them.  VM/370 is not a batch system (there is CMSBATCH
+which is a topic we don't cover here).  Instead, RSCS is mostly a system
+for transferring files.  RJE80 can connect to an RSCS link and send files
+to VM users and receive print files and punch files sent from other users.
+
+YOu need to first change your VM/370 sysgen to include the bisync lines,
+then configure RSCS for the lines you want to define.  To change your
+sysgen, insert these two lines into DMKRIO ASSEMBLE
+
+         RDEVICE ADDRESS=(070,16),DEVTYPE=2703,ADAPTER=BSCA 
+         RCTLUNIT ADDRESS=070,CUTYPE=2703,FEATURE=16-DEVICE 
+
+The RDEVICE should go into the RDEVICE section, and the RCTLUNIT in that
+section of course.
+
+To configure and regnerate RSCS, you need to modify 3 files.  Logon as
+RSCS and modify them with EDIT.  This is my AXSLINKS COPY
+
+ GENLINK ID=VMSYSUN,TYPE=DMTSML
+ GENLINK ID=LINE1,TYPE=DMTNPT,KEEP=5,LINE=0B1,TASK=M1
+ GENLINK ID=LINE2,TYPE=DMTNPT,KEEP=5,LINE=0B2,TASK=M2
+ GENLINK
+ GENLINK
+ GENLINK
+ GENLINK
+ GENLINK
+
+This is my LAXLINES COPY
+
+ GENLINE LINE=0B1
+ GENLINE LINE=0B2
+ GENLINE LINE=0B3
+
+This is my TAGQUEUE COPY
+
+ GENTAGQ NUM=64
+
+I use an EXEC I call RSCSGEN EXEC to regenerate RSCS automatically.
+This is it:
+
+ERASE DMTLOC MACLIB
+MACLIB GEN DMTLOC AXSLINKS LAXLINES TAGQUEUE
+EXEC VMFASM DMTSYS DMTR60
+CP CLOSE RDR
+CP PURGE RDR
+CP CLOSE PUN
+CP PURGE PUN
+CP SPOOL PUN TO * CLASS A
+CP SPOOL PRT FOR * CLOSE
+VMFLOAD DMTLOAD DMTR60
+CP CLOSE RDR
+CP SPOOL PUN OFF
+CP IPL C CLEAR
+
+When you run this, you'll be asked 4 questions, like this:
+
+DMTINI407R REWRITE THE NUCLEUS ?
+yes
+DMTINI408R IPL DEVICE ADDRESS =
+191
+DMTINI409R NUCLEUS CYL ADDRESS = 
+4
+DMTINI410R ALSO IPL CYLINDER 0 ? 
+yes
+
+RSCS will start up.  Later, when you logon to RSCS, you should
+do so with the NOIPL option:  LOGON RSCS RSCS NO
+Then when it's waiting, enter IPL 191 to start RSCS.  When RSCS
+is READY, you need to start the lines:
+
+START LINE1
+START LINE2
+
+VM/370 is now waiting for a call from RJE80.
+
+
+
+
+
+DOS/VS
+------
+
+DOS/VS supports the 3780 for RJE quite nicely.  It does so through its
+spooling subsystem POWER/VS.  You'll need to run a job to configure your
+bisync lines and remote terminals for POWER/VS.  This is all covered in
+detail in the POWER/VS installation and reference guide, starting on page
+34.  It will be a two-step process.  First, you'll need to modify your
+DOS/VS sysgen to include the bisync lines, then you'll need to define 
+them to POWER/VS by regenning it.
+
+I define 1 bisync line at device 070.  Put this statement in the
+right place (numeric order by device address) in your sysgen deck and 
+run a sysgen:
+
+         DVCGEN CHUN=X'070',DVCTYP=2703
+
+
+For the POWER/VS gen, insert these definitions after the POWER macro:
+
+         PLINE ADDR=X'070',TRNSP=YES,CODE=EBCDIC,PSWRD=PASSWORD,       X
+               TIMEOUT=NO,SWITCH=NO,MODSET=AA
+         PRMT  REMOTE=1,TYPE=3780,PUNROUT=1,LSTROUT=1,LIST=132
+
+
+Once you have run your sysgen, re-ipled with the new supervisor, 
+then regenned POWER/VS and start it up, you should be able to use
+this command to enable the line:
+
+S RJE,X'070',PASSWORD
+
+DOS/VS is now ready for a call from RJE80.
+
+
+
+
+Using RJE80
+-----------
+
+RJE80 will run under Windows or Linux.  It works identically on
+both.  It's a command-line driven program, sort of inspired by the
+familiar interface of the Unix FTP program.
+
+We'll practice by connecting to DOS/VS.
+
+The first thing I do is expand my window to show 132 columns 
+across, and expand its history buffer to the max.  I use a command
+window under Windows and Konsole under linux.  Most every terminal
+emulator will give you those choices.
+
+To use RJE80, you need to tell it three things.  The first is the
+address and port to connect to, the second is what host OS you're
+interfacing with, and the last is the line ID and password for the
+line you're using.  This takes three commands after you start the
+program:
+
+C:\>RJE80
+) OPEN my.hostname.com 3780
+RJE203I Link established to my.hostname.com (127.0.0.1)  port 3780.
+) SET DOS
+) SIGNON 1 PASSWORD
+)
+
+1R15I REMOTE 001 SIGNED ON ON 070
+
+)
+
+Now, if all went well, RJE80 is ready to work for you.  The message
+1R15I came from DOS itself, sent over the line to your printer. This
+is a pretty good sign that things are working!  However...if all 
+didn't go well, the SIGNON hangs up waiting, or gets an error
+message.  This means either the host isn't up, or the communications
+with the host is failing.  Check your hostname, address, port number,
+be sure Hercuels is running, DOS/VS us running, and the line is
+enabled from DOS.
+
+The SIGNON 1 PASSWORD logs us on to DOS...POWER/VS expects the
+username to match the line number you are using, and PASSWORD is what
+we set in the S RJE,X'070,PASSWORD command on the DOS operator's console.  
+
+To send it a card deck, let's say for example one called lvtoc.jcl,
+do this:
+
+) SEND lvtoc.jcl
+RJE173I Sending file 'lvtoc.jcl' to the host.
+RJE181I 9 Total records sent.
+)
+
+Now wait a bit.  Hmmm, nothing seems to be happening.  Thats because
+while DOS (hopefully) ran the job in lvtoc.jcl, its writer isn't
+started.  We can actually check it out from our RJE terminal. We'll
+use the CMD command:
+
+) C D LST
+
+1R46I    LIST QUEUE   P D C FROM TO  PAGES CC FORM
+1R46I  LVTOC    00018 3 D A 001 001      3  1 1PT6
+
+We sent a "D LST" command to DOS, it showed us our LST queue ... and
+sure enough, there's our LVTOC output waiting.  What's wrong is the
+rje writer isn't started.  We can start it, and tell it to go, like
+this:
+
+) CMD S LST
+) CMD G LST
+
+Now, the output from lvtoc.jcl scrolls out to your screen.  From here
+on you don't have to Start and Go the LST writer.  SEND lvtoc.jcl again,
+and after a delay you'll see its output appear automatically, unless
+it needs a different FORM type, it which case, as the operator for 
+this RJE line you'll need to do a G LST just like the DOS main operator
+does when forms change.
+
+RJE80 has features to make life a little easier for you.  Some are:
+
+* You can put the host and port on the command line: 
+         C:\>RJE80 my.host.com 3780
+* You can put startup commands in a file rje80.rc
+* Commands are not case sensitive.
+* all commands can be abbreviated.
+* Pretty extensive online help.  use HELP or ? at the command line.
+
+
+
+Transferring files to and from RSCS
+-----------------------------------
+
+C:\>rje80 vm370.mydomain.com 3780
+) SET VM
+) SI LINE1
+
+DMTNPT905I SIGNON OF LINK LINE1 COMPLETE
+
+)
+
+To send a file is easy enough, but before we do we need to indicate to which
+VM user the file will be sent.
+
+) SET USER MAINT
+) SEND whatever.txt
+
+To receive a file, you need to send it from another VM user.  Let's say we
+want to send a copy of the directory VM50 DIRECT from MAINT to our RJE80.
+Logon as MAINT, and set up to send a printout:
+
+LOGON MAINT CPCMS
+TAG DEV PRT LINE1
+SPOOL PRT TO RSCS
+PRINT VM50 DIRECT
+
+You'll see RSCS tell MAINT that the file is accepted, then if you look at
+the RSCS console you'll see it's sending the file (it's not instant, RSCS
+waits a bit).  Then you'll see it appear on your RJE80 screen.  If you
+want to save it and see it, use the PRINT command:
+
+) PRINT PRINTFILE.TXT
+
+If you don't want to display it onscreen:
+
+) SET NOCOPY
+
+Sending punch data is very similar.  To send a copy of VM50 DIRECT to the
+3780's punch device:
+
+TAG DEV PUN LINE1
+SP PUN TO RSCS
+PUNCH VM50 DIRECT
+
+RJE80 doesn't show punch data onscreen.  It saves it in the file you specify
+in the PUNCH statement.  The default if you don't say anything is 'punch.txt'.
+NOTE:  As of now, we can't handle binary data on the punch.  This is because
+transparent mode receive is broken, I think in the 2703 driver inside 
+hercules.  Soon, this will be fixed.
+
+
+----------------------------------------------------------------------------
+End of document (for now)
+
+
+ 
+ 
+
+
