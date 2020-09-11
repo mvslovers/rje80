@@ -3,6 +3,8 @@
 //  device.  This program will not work with "real" bisync hardware.
 
 #include <stdio.h>
+#include <stdlib.h>
+
 #if defined (_WIN32)	// Windows
 #include <winsock2.h>
 #include <conio.h>
@@ -11,13 +13,15 @@
 #include <windows.h>
 #else					// Linux
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <termios.h>
 #include <netdb.h>
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <ctype.h>
+#include <string.h>
 #endif
 #include <errno.h>
 
@@ -31,7 +35,7 @@ int gettoken(int upper);
 int InitSockets();
 int CloseSockets();
 int connecthost();
-int sendfile(char *command);
+int send_file(char *command);
 int get_buffer();
 unsigned char read_byte();
 int read_poll(int sec, int usec);
@@ -107,11 +111,11 @@ FILE *rcfd;
 char tracefile[80];
 
 char opt_user[32];		/* Username */
-int opt_poll = 0;		/* Poll when idle */
-int opt_trn = 0;		/* Transparency on all writes */
+int opt_poll = 1;		/* Poll when idle  TODO: was 0*/
+int opt_trn = 1;		/* Transparency on all writes TODO: was 0*/
 int opt_pause = 0;		/* -1 = every FF, 0 = none, > 0 = pause */
 int opt_copy = 1;		/* 1 = display printer output, 0 = no disp */
-int opt_os = 0;			/* 0 = generic */
+int opt_os = 2;			/* 0 = generic  TODO: was 0*/
 				/* 1 = VM/370 RSCS */
 				/* 2 = JES2 */
 				/* 3 = JES3 */
@@ -722,6 +726,8 @@ int execute()
 				strcat(signon, passw);
 				break;
 		}
+		//TODO: remove
+		strcpy(signon, "/*SIGNON       REMOTE001");
 		translate_to_ebcdic(signon);
 		strcat(line_out, signon);
 		line_out_size += strlen(signon);
@@ -955,7 +961,7 @@ int execute()
 			} else {
 				ttystr("OFF");
 			}
-			ttystr("\r\nRJE301I Transparent send: ");
+			ttystr("\r\nRJE301I openrent send: ");
 			if (opt_trn == 1) {
 				ttystr("ON");
 			} else {
@@ -1089,7 +1095,7 @@ int execute()
 			strcpy(cmdline, cmd);
 			break;
 		}
-		rc = sendfile(cmdline);
+		rc = send_file(cmdline);
 		if (rc != -1) {
 			status = IDLE;
 			pollflag = 2;
@@ -1136,7 +1142,7 @@ int execute()
 			}
 		}
 		status = SENDING;
-		sendfile("");
+		send_file("");
 		status = IDLE;
 		pollflag = 2;
 		pollctr = 0;
@@ -1542,7 +1548,7 @@ int connecthost()
 // This is the mighty SEND function
 // It's one parameter is a possible command to be sent in place of the file
 
-int sendfile(char *command)
+int send_file(char *command)
 {
 	int rc, i, count = 0, show = 0, retry = 0;
 	char wstr[32];
