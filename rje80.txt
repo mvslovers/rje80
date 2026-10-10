@@ -53,20 +53,35 @@ Configuring Hercules
 --------------------
 
 Note:  To use RJE80 with Hercules, you need version 3.01 or above.  The
-2703 emulation is broken in earlier releases.
+2703 emulation is broken in earlier releases.  The configuration below
+also applies to current SDL Hercules (Hyperion 4.x).
 
 Configuring Bisync lines is easy.  For each line you want to use, put a 
 line in your Hercules configuration file:
 
-0070 2703 dial=IN lhost=my.hostname.com lport=3780
+0070 2703 lport=3780 dial=IN lnctl=bsc
 
-This line places a 2703 compatible bisync line at device 0070.  You need
-to supply the internet name or IP address in the lhost parameter, and
-the port that Hercules will use to listen for incoming "calls" from RJE80
-in the lport parameter.  If you are only going to use RJE80 to connect 
-to Hercules running on the same machine, use 127.0.0.1 as the lhost.
-The lport is your choice, but it should be above 1000 and each separate
-bisync line requires its own unique port.
+This line places a 2703 compatible bisync line at device 0070, listening
+for incoming "calls" from RJE80 on TCP port 3780.  The lport is your
+choice, but it should be above 1024 and each separate bisync line
+requires its own unique port.  lnctl=bsc is the default and may be
+omitted; it is shown here for clarity.
+
+By default Hercules listens on all local interfaces.  To restrict the
+line to one interface, add lhost= with the IP address or the name of
+that interface, for example lhost=127.0.0.1 if RJE80 runs on the same
+machine as Hercules.  Do not copy a placeholder such as my.hostname.com:
+a name that does not resolve makes Hercules reject the device statement
+(message HHC01007E), and the line does not exist.  A name that resolves
+to an address which does not belong to the Hercules machine cannot be
+listened on either.
+
+Important:  With dial=IN, Hercules only answers a call while the host
+operating system has the line ENABLEd, that is while its RJE line is
+started and waiting for a terminal.  A call that arrives at any other
+time is accepted by TCP and closed again immediately, so RJE80 may
+report "Link established" and then get nothing back.  Start the line
+on the host first (see the next section), then OPEN it from RJE80.
 
 
 
